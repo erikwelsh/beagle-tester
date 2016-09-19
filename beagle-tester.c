@@ -3007,7 +3007,8 @@ char fontdata_8x8[] = {
 #define COLOR_PASS 0x00ff00u
 #define COLOR_FAIL 0xff0000u
 #define SCAN_VALUE_REPEAT "BURN-IN"
-#define SCAN_VALUE_COLORBAR "FCC"
+#define SCAN_VALUE_COLORBAR "COLORBAR"
+#define SCAN_VALUE_STOP "STOP"
 static volatile sig_atomic_t stop = 0;
 int fail = 0;
 int notice_line = 0;
@@ -3049,8 +3050,8 @@ int main(int argc, char** argv)
 	while (!stop) {
 		FD_ZERO(&rdfs);
 		FD_SET(barcode, &rdfs);
-		timeout.tv_sec = 1;
-		timeout.tv_usec = 0;
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 4000;
 		rd = select(barcode + 1, &rdfs, NULL, NULL, &timeout);
 		if (stop)
 			break;
@@ -3240,20 +3241,27 @@ int main(int argc, char** argv)
 		}
 
 		if(scan_i == 0 && argc > 1) {
-			strcpy(scan_value, argv[1]);
+			strcpy(scan_value, argv[argc-1]);
 			run = 1;
+			argc--;
 		}
 
 		if (run && !strcmp(scan_value, SCAN_VALUE_COLORBAR)) {
 			do_colorbar();
+		} else if (!strcmp(scan_value, SCAN_VALUE_STOP)) {
+			stop = 1;
+			break;
 		} else if (run) {
 			do_fill_screen(&fb_info, 0);
 			beagle_test(scan_value);
 			fprintf(stderr, "Test fails: %d\n", fail);
 			fflush(stderr);
-			if (!strcmp(scan_value, SCAN_VALUE_REPEAT) && !stop) {
-				// pause 2 seconds and run again
-				sleep(2);
+			if (stop) {
+				run = 0;
+				break;	
+			} else if (!strcmp(scan_value, SCAN_VALUE_REPEAT)) {
+				// pause 4 seconds and run again
+				sleep(4);
 			} else {
 				memset(scan_value, 0, sizeof(scan_value));
 				run = 0;
@@ -3362,8 +3370,8 @@ void beagle_test(const char *scan_value)
 	}
 
 	color = fail ? COLOR_FAIL : COLOR_PASS;
-	for (y = 500; y < 768; y++) {
-		for (x = 500; x < 1000; x++)
+	for (y = fb_info.var.yres/2; y < fb_info.var.yres; y++) {
+		for (x = fb_info.var.xres/2; x < fb_info.var.xres; x++)
 			draw_pixel(&fb_info, x, y, color);
 	}
 
@@ -3390,5 +3398,30 @@ void beagle_notice(const char *test, const char *status)
 
 void do_colorbar()
 {
-	system("fbi -T 1 -a -noverbose -d /dev/fb0 /usr/share/beagle-tester/itu-r-bt1729-colorbar-16x9.png");
+	static int init = 0;
+	static int cur_x = 285, cur_dir = 0;
+	int x, y;
+
+	if (!init) {
+		system("cat /usr/share/beagle-tester/itu-r-bt1729-colorbar-xenarc.raw > /dev/fb0");
+		init = 1;
+	}
+	
+	for (x = cur_x; x < cur_x+4; x++)
+		for (y = 390; y < 405; y++)
+			draw_pixel(&fb_info, x, y, 0x111414);
+			
+	if (cur_dir == 0) {
+		cur_x++;
+		if (cur_x >= 510) cur_dir = 1;
+	} else {
+		cur_x--;
+		if (cur_x <= 285) cur_dir = 0;
+	}
+
+	for (x = cur_x; x < cur_x+4; x++)
+		for (y = 390; y < 405; y++)
+			draw_pixel(&fb_info, x, y, 0xffffff);
+	
+	//usleep(4444);
 }
